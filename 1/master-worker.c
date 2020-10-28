@@ -37,7 +37,7 @@ void *generate_requests_loop(void *data)
 		pthread_cond_wait(&cond, &mutex); //signal 전까지 대기
 
 		//풀 버퍼인지 확인
-		if(curr_produced_idx - curr_consumed_idx == max_buf_size - 1) { 
+		if(curr_produced_idx - curr_consumed_idx == max_buf_size) { 
 			pthread_cond_signal(&cond);
 			continue;
 		}
