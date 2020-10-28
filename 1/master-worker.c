@@ -12,13 +12,8 @@ int item_to_produce, item_to_consum, curr_produced_idx, curr_consumed_idx;
 int total_items, max_buf_size, num_workers, num_masters;
 int *buffer;
 
-
-pthread_mutex_t master_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t worker_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t empty_buf_cond = PTHREAD_COND_INITIALIZER;
-pthread_cond_t full_buf_cond = PTHREAD_COND_INITIALIZER;
-pthread_cond_t produce_cond = PTHREAD_COND_INITIALIZER;
-pthread_cond_t consum_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
 void print_produced(int num, int master) 
 {
@@ -36,31 +31,29 @@ void *generate_requests_loop(void *data)
 {
 	int thread_id = *((int *)data);
 
+	pthread_mutex_lock(&mutex);
 	while(1)
 	{
-		pthread_mutex_lock(&master_mutex);
+		pthread_cond_wait(&cond, &mutex); //signal 전까지 대기
 
-		pthread_cond_wait(&produce_cond, &master_mutex); //signal 전까지 대기
 		//풀 버퍼인지 확인
-
-		if(curr_produced_idx - curr_consumed_idx == max_buf_size) {
-			pthread_cond_wait(&full_buf_cond, &master_mutex);
+		if(curr_produced_idx - curr_consumed_idx == max_buf_size - 1) { 
+			pthread_cond_signal(&cond);
+			continue;
 		}
 
 		//생산 끝이면 락 해제 후 종료
 		if(item_to_produce >= total_items) {
-			pthread_cond_broadcast(&produce_cond); 
-			pthread_mutex_unlock(&master_mutex); //unlock
+			pthread_cond_broadcast(&cond); 
+			pthread_mutex_unlock(&mutex); //unlock
 			break;
 		}
 
 		buffer[(curr_produced_idx++ % max_buf_size)] = item_to_produce;
 		print_produced(item_to_produce, thread_id);
-		item_to_produce++;
+		++item_to_produce;
 
-		pthread_cond_signal(&empty_buf_cond); //빈 버퍼 아님
-		pthread_cond_signal(&produce_cond); //wait에 시그널 보냄
-		pthread_mutex_unlock(&master_mutex); //unlock
+		pthread_cond_signal(&cond); //wait에 시그널
 	}
 	return 0;
 }
@@ -69,28 +62,27 @@ void *generate_consum_loop(void *data)
 {
 	int thread_id = *((int *)data);
 
+	pthread_mutex_lock(&mutex);
 	while(1)
 	{
-		pthread_mutex_lock(&worker_mutex);
+		pthread_cond_wait(&cond, &mutex);
+		
 		//빈 버퍼인지 확인
-		if(curr_produced_idx - curr_consumed_idx == 0 && item_to_consum < total_items) 
-			pthread_cond_wait(&empty_buf_cond, &worker_mutex);
-
-		pthread_cond_wait(&consum_cond, &worker_mutex); //signal 전까지 대기
+		if(curr_produced_idx - curr_consumed_idx == 0 && item_to_consum < total_items) {
+			pthread_cond_signal(&cond);
+			continue;
+		}
 
 		if(item_to_consum >= total_items) {
-			pthread_cond_broadcast(&empty_buf_cond);
-			pthread_cond_broadcast(&consum_cond);
-			pthread_mutex_unlock(&worker_mutex);
+			pthread_cond_broadcast(&cond);
+			pthread_mutex_unlock(&mutex);
 			break;
 		}
 
 		print_consumed(buffer[(curr_consumed_idx++ % max_buf_size)], thread_id);
-		item_to_consum++;
+		++item_to_consum;
 
-		pthread_cond_signal(&full_buf_cond); //풀 버퍼 아님
-		pthread_cond_signal(&consum_cond); //wait에 시그널 보냄
-		pthread_mutex_unlock(&worker_mutex); //unlock
+		pthread_cond_signal(&cond); //wait에 시그널 보냄
 	}
 }
 
@@ -142,9 +134,7 @@ int main(int argc, char *argv[])
 		pthread_create(&worker_thread[i], NULL, generate_consum_loop, (void *)&worker_thread_id[i]);
 
 	//signal 
-	pthread_cond_signal(&produce_cond);
-	sleep(1);
-	pthread_cond_signal(&consum_cond);
+	pthread_cond_signal(&cond);
 
 	//wait for all threads to complete
 	for (i = 0; i < num_masters; i++)
@@ -159,12 +149,8 @@ int main(int argc, char *argv[])
 		printf("worker %d joined\n", i);
 	}
 
-	pthread_mutex_destroy(&master_mutex);
-	pthread_mutex_destroy(&worker_mutex);
-	pthread_cond_destroy(&empty_buf_cond);
-	pthread_cond_destroy(&full_buf_cond);
-	pthread_cond_destroy(&produce_cond);
-	pthread_cond_destroy(&consum_cond);
+	pthread_mutex_destroy(&mutex);
+	pthread_cond_destroy(&cond);
 
 	/*----Deallocating Buffers---------------------*/
 	free(buffer);
