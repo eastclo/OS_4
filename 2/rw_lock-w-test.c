@@ -17,24 +17,24 @@ void r_lock(struct rw_lock * rw)
 	int req_check = 0;
     for(;;) {
         pthread_mutex_lock(&mutex);
-        if(rw->wlocked == 0 && rw->rlocked == 0 && rw->wRequest == 0) { //unlocked상태, 쓰기 요청 없을 시 lock
+        if(rw->wlocked == 0 && rw->wRequest == 0) { //unlocked상태, 쓰기 요청 없을 시 lock
             if(req_check == 1)
                 rw->rRequest--;
-            rw->rlocked = 1;
-            pthread_mutex_unlock(&mutex);
+            rw->rlocked++;
             break;
         }
         else if(req_check == 0) //최초 실패시 request증가
             rw->rRequest++, req_check = 1;
         pthread_mutex_unlock(&mutex);
     }
+    pthread_mutex_unlock(&mutex);
 }
 
 void r_unlock(struct rw_lock * rw)
 {
 	//	Write the code for releasing read-write lock by the reader.
 	pthread_mutex_lock(&mutex);
-	rw->rlocked = 0;
+	rw->rlocked--;
 	pthread_mutex_unlock(&mutex);
 }
 
@@ -48,13 +48,13 @@ void w_lock(struct rw_lock * rw)
             if(req_check == 1)
                 rw->wRequest--;
             rw->wlocked = 1;
-            pthread_mutex_unlock(&mutex);
             break;
         }
         else if(req_check == 0) //최초 실패시 request증가
             rw->wRequest++, req_check = 1;
         pthread_mutex_unlock(&mutex);
     }
+	pthread_mutex_unlock(&mutex);
 }
 
 void w_unlock(struct rw_lock * rw)
