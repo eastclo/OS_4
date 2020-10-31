@@ -5,7 +5,10 @@
 
 struct rw_lock
 {
-
+	int rlocked; //read lock일시 true
+	int wlocked; //write lock일시 true
+	int rRequest; //read 요청 횟수
+	int wRequest; //write 요청 횟수
 };
 
 void init_rwlock(struct rw_lock * rw);
