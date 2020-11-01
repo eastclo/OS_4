@@ -8,8 +8,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
-int item_to_produce, item_to_consum, curr_produced_idx, curr_consumed_idx;
-int total_items, max_buf_size, num_workers, num_masters;
+int item_to_produce, item_to_consume, curr_produced_idx, curr_consumed_idx;
+int total_items, max_buf_size, num_workers, num_masters, done_master;
 int *buffer;
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -32,7 +32,7 @@ void *generate_requests_loop(void *data)
 	int thread_id = *((int *)data);
 
 	pthread_mutex_lock(&mutex);
-	while(1)
+	for(;;)
 	{
 		pthread_cond_wait(&cond, &mutex); //signal 전까지 대기
 
@@ -58,29 +58,30 @@ void *generate_requests_loop(void *data)
 	return 0;
 }
 
-void *generate_consum_loop(void *data)
+void *consume_request_loop(void *data)
 {
 	int thread_id = *((int *)data);
 
 	pthread_mutex_lock(&mutex);
-	while(1)
+	for(;;)
 	{
-		pthread_cond_wait(&cond, &mutex);
+		if(done_master == 0 || num_workers != 1)
+			pthread_cond_wait(&cond, &mutex);
 		
 		//빈 버퍼인지 확인
-		if(curr_produced_idx - curr_consumed_idx == 0 && item_to_consum < total_items) {
+		if(curr_produced_idx - curr_consumed_idx == 0 && item_to_consume < total_items) {
 			pthread_cond_signal(&cond);
 			continue;
 		}
 
-		if(item_to_consum >= total_items) {
+		if(item_to_consume >= total_items) {
 			pthread_cond_broadcast(&cond);
 			pthread_mutex_unlock(&mutex);
 			break;
 		}
 
 		print_consumed(buffer[(curr_consumed_idx++ % max_buf_size)], thread_id);
-		++item_to_consum;
+		++item_to_consume;
 
 		pthread_cond_signal(&cond); //wait에 시그널 보냄
 	}
@@ -96,7 +97,7 @@ int main(int argc, char *argv[])
 	pthread_t *master_thread;
 	pthread_t *worker_thread;
 	item_to_produce = 0;
-	item_to_consum = 0;
+	item_to_consume = 0;
 	curr_produced_idx = 0;
 	curr_consumed_idx = 0;
 
@@ -131,8 +132,9 @@ int main(int argc, char *argv[])
 		worker_thread_id[i] = i;
 
 	for (i = 0; i < num_workers; i++)
-		pthread_create(&worker_thread[i], NULL, generate_consum_loop, (void *)&worker_thread_id[i]);
+		pthread_create(&worker_thread[i], NULL, consume_request_loop, (void *)&worker_thread_id[i]);
 
+	usleep(10);
 	//signal 
 	pthread_cond_signal(&cond);
 
@@ -142,6 +144,10 @@ int main(int argc, char *argv[])
 		pthread_join(master_thread[i], NULL);
 		printf("master %d joined\n", i);
 	}
+	
+	done_master = 1;
+	if(num_workers == 1)
+		pthread_cond_signal(&cond);
 
 	for (i = 0; i < num_workers; i++)
 	{
